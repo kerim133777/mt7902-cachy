@@ -23,10 +23,18 @@ success() { echo -e "${G}[OK]${NC} $1"; }
 log "Checking for source files..."
 if [[ ! -d "wifi-source" ]]; then
     log "wifi-source not found. Cloning from repository..."
-    # Clone to a temp folder, move the wifi part, then clean up
     git clone --depth 1 "$SOURCE_REPO" /tmp/mt7902_sync > /dev/null
-    cp -r /tmp/mt7902_sync/wifi-source ./
-    success "Wi-Fi source synchronized."
+    
+    # This finds the actual driver folder even if the name is different
+    WIFI_PATH=$(find /tmp/mt7902_sync -type d -name "*wifi*" | head -n 1)
+    
+    if [[ -n "$WIFI_PATH" ]]; then
+        cp -r "$WIFI_PATH" ./wifi-source
+        success "Wi-Fi source synchronized."
+    else
+        log "Error: Could not find Wi-Fi source in the cloned repo."
+        exit 1
+    fi
 fi
 
 # Ensure firmware is present
