@@ -3,13 +3,6 @@
 
 An optimized, minimalist driver fix for the **MediaTek MT7902** wireless card. Specifically built for **CachyOS** and **Arch Linux** on **Kernel 7.0+**.
 
-## Features
-- **Bluetooth Repair**: Patches memory conflicts and redefinition errors for 7.x kernels.
-- **Wi-Fi Optimization**: Compiles the mt7921e driver using the Clang/LLVM toolchain with ThinLTO.
-- **Zero-Latency Gaming**: Disables ASPM (Power Management) to eliminate ping spikes.
-- **Live Logs**: Displays real-time compilation data (CC/LD/BTF) during install.
-- **Auto-Sync**: Automatically resets hardware modules after installation.
-
 ## Tested Hardware
 - **Acer Extensa 215-55**
 - Devices using the **MediaTek MT7902** card.
