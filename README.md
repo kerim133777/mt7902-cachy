@@ -37,4 +37,4 @@ sudo pacman -S linux-cachyos-headers
 ```
 
 ## License
-Licensed under the **MT License**.
+Licensed under the **MIT License**.
