@@ -24,24 +24,25 @@ log "Checking for source files..."
 if [[ ! -d "wifi-source" ]]; then
     log "wifi-source not found. Cloning from repository..."
     
-    # Remove old sync folder if it exists from a failed run
     rm -rf /tmp/mt7902_sync
-    
     git clone --depth 1 "$SOURCE_REPO" /tmp/mt7902_sync > /dev/null
     
-    # Find the driver folder (handles different names like 'wifi' or 'wifi-source')
-    WIFI_PATH=$(find /tmp/mt7902_sync -type d -name "*wifi*" | head -n 1)
+    # 1. Try to find a folder with 'wifi' in the name
+    WIFI_PATH=$(find /tmp/mt7902_sync -maxdepth 2 -type d -name "*wifi*" | head -n 1)
     
     if [[ -n "$WIFI_PATH" ]]; then
         cp -r "$WIFI_PATH" ./wifi-source
-        success "Wi-Fi source synchronized."
     else
-        log "Error: Could not find Wi-Fi source in the cloned repo."
-        exit 1
+        # 2. If no folder found, the root of the repo is likely the source
+        log "No subfolder found. Using repository root as source..."
+        mkdir -p wifi-source
+        cp -r /tmp/mt7902_sync/* ./wifi-source/
     fi
-    # Clean up after copying
+    
+    success "Wi-Fi source synchronized."
     rm -rf /tmp/mt7902_sync
 fi
+
 # Ensure firmware is present
 if [[ ! -f "$FW_DIR/BT_RAM_CODE_MT7902_1_1_hdr.bin" ]]; then
     log "Firmware missing. Deploying from source..."
