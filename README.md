@@ -29,8 +29,8 @@ If you need to revert to system defaults:
 
 1. **Remove DKMS Modules**:
 ```bash
-sudo dkms remove mt7902-wifi/1.0 --all 
-sudo dkms remove mt7902-bluetooth/$(dkms status | grep mt7902-bluetooth | awk -F'[,/:]' '{print $2}' | xargs) --all
+sudo dkms remove mt7902-wifi/1.0 --all 2>/dev/null || echo "WiFi module already removed."
+sudo dkms remove $(dkms status | grep "mt7902-bluetooth" | awk -F'[,/]' '{print $1"/"$2}' | xargs) --all 2>/dev/null || echo "Bluetooth module already removed."
 ```
 
 2. **Remove Configuration Files**:
