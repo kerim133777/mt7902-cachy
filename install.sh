@@ -85,7 +85,8 @@ dkms install mt7902-wifi/"$WIFI_VER"
 log "Configuring hardware persistence..."
 
 # Force load Bluetooth modules at boot
-echo -e "btmtk\nbtusb" | tee /etc/modules-load.d/mediatek-bt.conf > /dev/null
+echo -e "mt76\nbtmtk\nbtusb\nmt7921e" | sudo tee /etc/modules-load.d/mt7902.conf
+sudo mkinitcpio -P
 
 # Enable Auto-Power for Bluetooth
 if [ -f /etc/bluetooth/main.conf ]; then
