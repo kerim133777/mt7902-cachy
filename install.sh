@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# MT7902 Optimized Installer (Standalone Edition - Acer Extensa / CachyOS Fix)
+# MT7902 Combined DKMS Installer (Standalone & Optimized)
 set -e
 
 # Colors for terminal output
@@ -10,7 +10,7 @@ NC='\033[0m'
 
 KVER=$(uname -r)
 CORES=$(nproc)
-FW_DIR="/lib/firmware/mediatek"
+WIFI_VER="1.0"
 SOURCE_REPO="https://github.com/OnlineLearningTutorials/mt7902_temp.git"
 
 log() { echo -e "${C}[LOG]${NC} $(date +%H:%M:%S) | $1"; }
@@ -18,89 +18,100 @@ success() { echo -e "${G}[OK]${NC} $1"; }
 
 [[ $EUID -ne 0 ]] && echo "Please run with sudo" && exit 1
 
-# --- 1. Dependency & Source Sync ---
-log "Checking for source files..."
-if [[ ! -d "wifi-source" ]]; then
-    log "wifi-source not found. Cloning and staging for Kernel 7.0..."
-    
-    rm -rf /tmp/mt7902_sync
-    git clone --depth 1 "$SOURCE_REPO" /tmp/mt7902_sync > /dev/null
-    
-    if [[ -d "/tmp/mt7902_sync/linux-7.0/drivers/net/wireless/mediatek/mt76" ]]; then
-        mkdir -p wifi-source
-        cp -r /tmp/mt7902_sync/linux-7.0/drivers/net/wireless/mediatek/mt76/* ./wifi-source/
-        [[ -d "/tmp/mt7902_sync/wlan_mt7902" ]] && cp -r /tmp/mt7902_sync/wlan_mt7902 ./wifi-source/mt7902
-    fi
-    success "Wi-Fi source synchronized."
-fi
+# --- 0. Conflict Cleanup ---
+# Removes old "ghost" modules that cause "Bad return status" errors
+log "Cleaning up old/conflicting modules..."
+dkms remove gen4-mt7902/0.1 --all 2>/dev/null || true
+rm -rf /usr/src/gen4-mt7902-0.1 2>/dev/null || true
 
-# Ensure firmware is present
-if [[ ! -f "$FW_DIR/BT_RAM_CODE_MT7902_1_1_hdr.bin" ]]; then
-    log "Deploying firmware..."
-    mkdir -p "$FW_DIR"
-    find /tmp/mt7902_sync -name "*.bin" -exec cp {} "$FW_DIR/" \; 2>/dev/null || true
-fi
+# --- 1. Source Staging & Organization ---
+log "Checking and staging sources for Kernel 7.0..."
 rm -rf /tmp/mt7902_sync
+git clone --depth 1 "$SOURCE_REPO" /tmp/mt7902_sync > /dev/null
 
-# --- 2. System Prep ---
-log "Updating toolchain..."
-pacman -Sy --needed --noconfirm linux-cachyos-headers base-devel clang lld llvm zstd bc > /dev/null
+WIFI_SRC_DIR="/usr/src/mt7902-wifi-$WIFI_VER"
+mkdir -p "$WIFI_SRC_DIR"
 
-# --- 3. Bluetooth Patching ---
+if [[ -d "/tmp/mt7902_sync/linux-7.0/drivers/net/wireless/mediatek/mt76" ]]; then
+    cp -r /tmp/mt7902_sync/linux-7.0/drivers/net/wireless/mediatek/mt76/* "$WIFI_SRC_DIR/"
+    [[ -d "/tmp/mt7902_sync/wlan_mt7902" ]] && cp -r /tmp/mt7902_sync/wlan_mt7902 "$WIFI_SRC_DIR/mt7902"
+    success "Source staged in $WIFI_SRC_DIR"
+else
+    log "Error: Kernel 7.0 source not found in repo."
+    exit 1
+fi
+
+# --- 2. Create WiFi DKMS Config ---
+log "Creating WiFi DKMS configuration..."
+cat <<EOF > "$WIFI_SRC_DIR/dkms.conf"
+PACKAGE_NAME="mt7902-wifi"
+PACKAGE_VERSION="$WIFI_VER"
+BUILT_MODULE_NAME[0]="mt76"
+DEST_MODULE_LOCATION[0]="/kernel/drivers/net/wireless/mediatek/mt76"
+BUILT_MODULE_NAME[1]="mt76-connac-lib"
+DEST_MODULE_LOCATION[1]="/kernel/drivers/net/wireless/mediatek/mt76"
+BUILT_MODULE_NAME[2]="mt792x-lib"
+DEST_MODULE_LOCATION[2]="/kernel/drivers/net/wireless/mediatek/mt76"
+BUILT_MODULE_NAME[3]="mt7921-common"
+BUILT_MODULE_LOCATION[3]="mt7921/"
+DEST_MODULE_LOCATION[3]="/kernel/drivers/net/wireless/mediatek/mt76/mt7921"
+BUILT_MODULE_NAME[4]="mt7921e"
+BUILT_MODULE_LOCATION[4]="mt7921/"
+DEST_MODULE_LOCATION[4]="/kernel/drivers/net/wireless/mediatek/mt76/mt7921"
+AUTOINSTALL="yes"
+MAKE="make -C /lib/modules/\$(uname -r)/build M=\${dkms_tree}/\${PACKAGE_NAME}/\${PACKAGE_VERSION}/build LLVM=1 CC=clang HOSTCC=clang modules"
+CLEAN="make -C /lib/modules/\$(uname -r)/build M=\${dkms_tree}/\${PACKAGE_NAME}/\${PACKAGE_VERSION}/build clean"
+EOF
+
+# --- 3. Bluetooth Patching & Registration ---
 BT_SRC=$(find /usr/src -maxdepth 1 -type d -name "mt7902-bluetooth-*" | head -n 1)
 if [[ -d "$BT_SRC" ]]; then
-    log "Patching Bluetooth for Kernel $KVER..."
+    log "Applying Bluetooth patches for Kernel 7.0..."
     cd "$BT_SRC"
     sed -i '/#define false/d; /#define true/d' *.c 2>/dev/null || true
     sed -i 's/kmalloc_obj/kmalloc/g; s/kzalloc_obj/kzalloc/g' *.c 2>/dev/null || true
-    VER=$(basename "$BT_SRC" | sed 's/mt7902-bluetooth-//')
-    dkms remove mt7902-bluetooth/"$VER" --all 2>/dev/null || true
-    dkms add mt7902-bluetooth/"$VER" && dkms install mt7902-bluetooth/"$VER"
+    BT_V=$(basename "$BT_SRC" | sed 's/mt7902-bluetooth-//')
+    dkms add mt7902-bluetooth/"$BT_V" 2>/dev/null || true
+    dkms install mt7902-bluetooth/"$BT_V" || true
     cd - > /dev/null
 fi
 
-# --- 4. Wi-Fi Compilation ---
-log "Building Wi-Fi driver with Clang/LLVM..."
-cd wifi-source
-make clean LLVM=1 > /dev/null 2>&1 || true
-make -C /lib/modules/"$KVER"/build M="$PWD" LLVM=1 CC=clang HOSTCC=clang EXTRA_CFLAGS="-O3 -march=native -flto=thin" modules -j"$CORES"
+# --- 4. WiFi DKMS Installation ---
+log "Registering and installing WiFi DKMS module..."
+dkms add mt7902-wifi/"$WIFI_VER" 2>/dev/null || true
+dkms install mt7902-wifi/"$WIFI_VER"
 
-log "Deploying modules..."
-DEST="/lib/modules/$KVER/kernel/drivers/net/wireless/mediatek/mt76"
-mkdir -p "$DEST/mt7921"
-cp mt76.ko mt76-connac-lib.ko mt792x-lib.ko "$DEST/" 2>/dev/null || true
-[[ -d "mt7921" ]] && cp mt7921/mt7921e.ko mt7921/mt7921-common.ko "$DEST/mt7921/" 2>/dev/null || true
-zstd --rm -19 -f "$DEST"/*.ko "$DEST/mt7921"/*.ko 2>/dev/null || true
-cd ..
+# --- 5. Persistence & Automation ---
+log "Configuring hardware persistence..."
 
-# --- 5. THE "HART" RESTART (Integrated Fix) ---
-log "Performing hard hardware reset..."
+# Force load Bluetooth modules at boot
+echo -e "btmtk\nbtusb" | tee /etc/modules-load.d/mediatek-bt.conf > /dev/null
 
-# Disable power management tweaks
+# Enable Auto-Power for Bluetooth
+if [ -f /etc/bluetooth/main.conf ]; then
+    sed -i 's/#AutoEnable=true/AutoEnable=true/' /etc/bluetooth/main.conf
+fi
+
+# Power management tweak for WiFi stability
 echo "options mt7921e disable_aspm=1" > /etc/modprobe.d/mt7902.conf
 
-# 1. Stop Bluetooth first (essential to unlock driver)
+# --- 6. THE "HART" RESTART ---
+log "Reloading module stack..."
 systemctl stop bluetooth || true
 
-# 2. Unload modules in reverse order of dependency
-log "Unloading old driver stack..."
-modprobe -r mt7921e 2>/dev/null || true
-modprobe -r btusb 2>/dev/null || true
-modprobe -r btmtk 2>/dev/null || true
-modprobe -r mt7921_common 2>/dev/null || true
-modprobe -r mt76_connac_lib 2>/dev/null || true
-modprobe -r mt76 2>/dev/null || true
+# Unload old versions
+modprobe -r mt7921e btusb btmtk mt7921_common mt76_connac_lib mt76 2>/dev/null || true
 
-# 3. Reload everything fresh
-log "Reloading new driver stack..."
+# Refresh and load new ones
 depmod -a "$KVER"
 modprobe mt76
 modprobe btmtk
 modprobe btusb
-modprobe mt7921e 2>/dev/null || modprobe mt7902 2>/dev/null || true
+modprobe mt7921e 2>/dev/null || true
 
-# 4. Restart Services
-systemctl restart bluetooth
+# Restart services
+systemctl start bluetooth
 systemctl restart NetworkManager
 
-success "Install complete! Your MT7902 hardware has been hard-restarted and optimized."
+rm -rf /tmp/mt7902_sync
+success "MT7902 Full Stack Installed! WiFi and Bluetooth are now automated and DKMS-managed."
