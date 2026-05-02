@@ -19,7 +19,7 @@ An optimized, "set-and-forget" driver fix for the **MediaTek MT7902** wireless c
 git clone https://github.com/kerim133777/mt7902-cachy.git
 cd mt7902-cachy
 chmod +x install.sh
-sudo ./install.sh
+sudo bash install.sh
 ```
 
 **Note:** A reboot is required after installation to finalize the hardware state and clear out the old module stack.
