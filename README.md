@@ -18,7 +18,6 @@ An optimized, "set-and-forget" driver fix for the **MediaTek MT7902** wireless c
 ```bash
 git clone https://github.com/kerim133777/mt7902-cachy.git
 cd mt7902-cachy
-chmod +x install.sh
 sudo bash install.sh
 ```
 
