@@ -84,8 +84,26 @@ dkms install mt7902-wifi/"$WIFI_VER"
 # --- 5. Persistence & Automation ---
 log "Configuring hardware persistence..."
 
-# Force modules to load on boot
-echo -e "mt76\nbtmtk\nbtusb\mt7921e" | sudo tee /etc/modules-load.d/mt7902.conf
+# Automated Systemd Fix
+cat <<EOF | sudo tee /usr/local/bin/mt7902-init.sh
+#!/bin/bash
+modprobe -r mt7921e btusb btmtk mt7921_common mt76_connac_lib mt76 2>/dev/null
+sleep 1
+modprobe mt76 && modprobe btmtk && modprobe btusb && modprobe mt7921e
+EOF
+sudo chmod +x /usr/local/bin/mt7902-init.sh
+
+cat <<EOF | sudo tee /etc/systemd/system/mt7902-fix.service
+[Unit]
+Description=MT7902 Fix
+After=multi-user.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/mt7902-init.sh
+[Install]
+WantedBy=multi-user.target
+EOF
+sudo systemctl enable mt7902-fix.service
 
 # Blacklist the 'Original' broken modules to prevent conflicts
 echo -e "blacklist mt7921_common\nblacklist mt7921_lib" | sudo tee /etc/modprobe.d/mt7902-blacklist.conf
