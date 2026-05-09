@@ -113,7 +113,6 @@ if [ -f /etc/bluetooth/main.conf ]; then
     sed -i 's/#AutoEnable=true/AutoEnable=true/' /etc/bluetooth/main.conf
 fi
 
-echo "options mt7921e disable_aspm=1" | sudo tee /etc/modprobe.d/mt7902.conf > /dev/null
 
 # --- 6. THE "HART" RESTART ---
 log "Reloading module stack..."
