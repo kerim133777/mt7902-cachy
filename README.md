@@ -7,7 +7,6 @@ An optimized, "set-and-forget" driver fix for the **MediaTek MT7902** wireless c
 *   **DKMS Managed**: Automatically rebuilds the driver after kernel updates.
 *   **Bluetooth Persistence**: Configures the system to load Bluetooth modules and auto-power the controller on boot.
 *   **Conflict Cleanup**: Automatically detects and removes old "ghost" modules (like `gen4-mt7902`) that cause build failures.
-*   **Stability Tweak**: Disables ASPM (Active State Power Management) for the MT7921e to prevent connection drops.
 
 ## Tested Hardware
 - **Acer Extensa 215-55** (i3-1215U)
