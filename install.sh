@@ -1,24 +1,29 @@
 #!/bin/bash
 set -e
 
+# Colors for readability
 G='\033[38;5;82m'
 C='\033[38;5;51m'
 NC='\033[0m'
 
-KVER=$(uname -r)
+# Constants
 WIFI_VER="1.0"
 SOURCE_REPO="https://github.com/OnlineLearningTutorials/mt7902_temp.git"
 
 log() { echo -e "${C}[LOG]${NC} $(date +%H:%M:%S) | $1"; }
 success() { echo -e "${G}[OK]${NC} $1"; }
 
+# 1. Dependency Check
 [[ $EUID -ne 0 ]] && echo "Please run with sudo" && exit 1
 
-dkms remove gen4-mt7902/0.1 --all 2>/dev/null || true
-dkms remove mt7902-wifi/1.0 --all 2>/dev/null || true
-rm -rf /usr/src/gen4-mt7902-0.1 2>/dev/null || true
-rm -rf /usr/src/mt7902-wifi-1.0 2>/dev/null || true
+# 2. Cleanup
+log "Removing old modules..."
+dkms remove gen4-mt7902/0.1 --all --no-depmod 2>/dev/null || true
+dkms remove mt7902-wifi/1.0 --all --no-depmod 2>/dev/null || true
+rm -rf /usr/src/gen4-mt7902-0.1 /usr/src/mt7902-wifi-1.0 2>/dev/null || true
 
+# 3. Source Staging
+log "Staging source files..."
 rm -rf /tmp/mt7902_sync
 git clone --depth 1 "$SOURCE_REPO" /tmp/mt7902_sync > /dev/null
 
@@ -29,9 +34,11 @@ if [[ -d "/tmp/mt7902_sync/linux-7.0/drivers/net/wireless/mediatek/mt76" ]]; the
     cp -r /tmp/mt7902_sync/linux-7.0/drivers/net/wireless/mediatek/mt76/* "$WIFI_SRC_DIR/"
     [[ -d "/tmp/mt7902_sync/wlan_mt7902" ]] && cp -r /tmp/mt7902_sync/wlan_mt7902 "$WIFI_SRC_DIR/mt7902"
 else
+    log "Error: Source directory not found."
     exit 1
 fi
 
+# 4. Multi-Module DKMS Config (Kept exactly as your working logic)
 cat <<EOF > "$WIFI_SRC_DIR/dkms.conf"
 PACKAGE_NAME="mt7902-wifi"
 PACKAGE_VERSION="$WIFI_VER"
@@ -52,6 +59,7 @@ MAKE="make -C /lib/modules/\$(uname -r)/build M=\${dkms_tree}/\${PACKAGE_NAME}/\
 CLEAN="make -C /lib/modules/\$(uname -r)/build M=\${dkms_tree}/\${PACKAGE_NAME}/\${PACKAGE_VERSION}/build clean"
 EOF
 
+# 5. Bluetooth Patching
 BT_SRC=$(find /usr/src -maxdepth 1 -type d -name "mt7902-bluetooth-*" | head -n 1)
 if [[ -d "$BT_SRC" ]]; then
     cd "$BT_SRC"
@@ -60,28 +68,27 @@ if [[ -d "$BT_SRC" ]]; then
     sed -i 's/kmalloc_obj/kmalloc/g; s/kzalloc_obj/kzalloc/g' *.c 2>/dev/null || true
     BT_V=$(basename "$BT_SRC" | sed 's/mt7902-bluetooth-//')
     dkms add mt7902-bluetooth/"$BT_V" 2>/dev/null || true
-    dkms install mt7902-bluetooth/"$BT_V" || true
+    dkms install mt7902-bluetooth/"$BT_V" --no-depmod || true
     cd - > /dev/null
 fi
 
+# 6. Installation
 dkms add mt7902-wifi/"$WIFI_VER" 2>/dev/null || true
 dkms install mt7902-wifi/"$WIFI_VER"
 
-cat <<EOF | sudo tee /usr/local/bin/mt7902-init.sh > /dev/null
+# 7. Persistence
+cat <<EOF | tee /usr/local/bin/mt7902-init.sh > /dev/null
 #!/bin/bash
 modprobe -r mt7921e btusb btmtk mt7921_common mt76_connac_lib mt76 2>/dev/null
 sleep 2
-modprobe mt76
-modprobe btmtk
-modprobe btusb
-modprobe mt7921e
+modprobe mt76 && modprobe btmtk && modprobe btusb && modprobe mt7921e
 sleep 3
 rfkill unblock bluetooth
 bluetoothctl power on 2>/dev/null || true
 EOF
-sudo chmod +x /usr/local/bin/mt7902-init.sh
+chmod +x /usr/local/bin/mt7902-init.sh
 
-cat <<EOF | sudo tee /etc/systemd/system/mt7902-fix.service > /dev/null
+cat <<EOF | tee /etc/systemd/system/mt7902-fix.service > /dev/null
 [Unit]
 Description=MT7902 WiFi/BT Fix
 After=multi-user.target
@@ -91,9 +98,9 @@ ExecStart=/usr/local/bin/mt7902-init.sh
 [Install]
 WantedBy=multi-user.target
 EOF
-sudo systemctl enable --now mt7902-fix.service
+systemctl enable --now mt7902-fix.service
 
-echo -e "blacklist mt7921_common\nblacklist mt7921_lib" | sudo tee /etc/modprobe.d/mt7902-blacklist.conf > /dev/null
+echo -e "blacklist mt7921_common\nblacklist mt7921_lib" | tee /etc/modprobe.d/mt7902-blacklist.conf > /dev/null
 
 if [ -f /etc/bluetooth/main.conf ]; then
     sed -i 's/#AutoEnable=true/AutoEnable=true/' /etc/bluetooth/main.conf
@@ -101,4 +108,4 @@ fi
 
 systemctl restart bluetooth
 rm -rf /tmp/mt7902_sync
-success "MT7902 Full Stack Installed and Power-Managed."
+success "MT7902 Full Stack Installed!"
