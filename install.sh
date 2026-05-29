@@ -1,15 +1,11 @@
 #!/bin/bash
-
-# MT7902 Combined DKMS Installer (Standalone & Optimized) - FIXED FOR GCC
 set -e
 
-# Colors for terminal output
 G='\033[38;5;82m'
 C='\033[38;5;51m'
 NC='\033[0m'
 
 KVER=$(uname -r)
-CORES=$(nproc)
 WIFI_VER="1.0"
 SOURCE_REPO="https://github.com/OnlineLearningTutorials/mt7902_temp.git"
 
@@ -18,15 +14,11 @@ success() { echo -e "${G}[OK]${NC} $1"; }
 
 [[ $EUID -ne 0 ]] && echo "Please run with sudo" && exit 1
 
-# --- 0. Conflict Cleanup ---
-log "Cleaning up old/conflicting modules..."
 dkms remove gen4-mt7902/0.1 --all 2>/dev/null || true
 dkms remove mt7902-wifi/1.0 --all 2>/dev/null || true
 rm -rf /usr/src/gen4-mt7902-0.1 2>/dev/null || true
 rm -rf /usr/src/mt7902-wifi-1.0 2>/dev/null || true
 
-# --- 1. Source Staging & Organization ---
-log "Checking and staging sources for Kernel 7.0..."
 rm -rf /tmp/mt7902_sync
 git clone --depth 1 "$SOURCE_REPO" /tmp/mt7902_sync > /dev/null
 
@@ -36,14 +28,10 @@ mkdir -p "$WIFI_SRC_DIR"
 if [[ -d "/tmp/mt7902_sync/linux-7.0/drivers/net/wireless/mediatek/mt76" ]]; then
     cp -r /tmp/mt7902_sync/linux-7.0/drivers/net/wireless/mediatek/mt76/* "$WIFI_SRC_DIR/"
     [[ -d "/tmp/mt7902_sync/wlan_mt7902" ]] && cp -r /tmp/mt7902_sync/wlan_mt7902 "$WIFI_SRC_DIR/mt7902"
-    success "Source staged in $WIFI_SRC_DIR"
 else
-    log "Error: Kernel 7.0 source not found in repo."
     exit 1
 fi
 
-# --- 2. Create WiFi DKMS Config (COMPILER FIX APPLIED HERE) ---
-log "Creating WiFi DKMS configuration..."
 cat <<EOF > "$WIFI_SRC_DIR/dkms.conf"
 PACKAGE_NAME="mt7902-wifi"
 PACKAGE_VERSION="$WIFI_VER"
@@ -64,12 +52,9 @@ MAKE="make -C /lib/modules/\$(uname -r)/build M=\${dkms_tree}/\${PACKAGE_NAME}/\
 CLEAN="make -C /lib/modules/\$(uname -r)/build M=\${dkms_tree}/\${PACKAGE_NAME}/\${PACKAGE_VERSION}/build clean"
 EOF
 
-# --- 3. Bluetooth Patching & Registration ---
 BT_SRC=$(find /usr/src -maxdepth 1 -type d -name "mt7902-bluetooth-*" | head -n 1)
 if [[ -d "$BT_SRC" ]]; then
-    log "Applying Bluetooth patches for Kernel 7.0..."
     cd "$BT_SRC"
-    # Ensure Bluetooth also uses standard CC if its dkms.conf has forced clang
     sed -i 's/ LLVM=1 CC=clang HOSTCC=clang//g' dkms.conf 2>/dev/null || true
     sed -i '/#define false/d; /#define true/d' *.c 2>/dev/null || true
     sed -i 's/kmalloc_obj/kmalloc/g; s/kzalloc_obj/kzalloc/g' *.c 2>/dev/null || true
@@ -79,25 +64,26 @@ if [[ -d "$BT_SRC" ]]; then
     cd - > /dev/null
 fi
 
-# --- 4. WiFi DKMS Installation ---
-log "Registering and installing WiFi DKMS module..."
 dkms add mt7902-wifi/"$WIFI_VER" 2>/dev/null || true
 dkms install mt7902-wifi/"$WIFI_VER"
-
-# --- 5. Persistence & Automation ---
-log "Configuring hardware persistence..."
 
 cat <<EOF | sudo tee /usr/local/bin/mt7902-init.sh > /dev/null
 #!/bin/bash
 modprobe -r mt7921e btusb btmtk mt7921_common mt76_connac_lib mt76 2>/dev/null
-sleep 1
-modprobe mt76 && modprobe btmtk && modprobe btusb && modprobe mt7921e
+sleep 2
+modprobe mt76
+modprobe btmtk
+modprobe btusb
+modprobe mt7921e
+sleep 3
+rfkill unblock bluetooth
+bluetoothctl power on 2>/dev/null || true
 EOF
 sudo chmod +x /usr/local/bin/mt7902-init.sh
 
 cat <<EOF | sudo tee /etc/systemd/system/mt7902-fix.service > /dev/null
 [Unit]
-Description=MT7902 Fix
+Description=MT7902 WiFi/BT Fix
 After=multi-user.target
 [Service]
 Type=oneshot
@@ -105,7 +91,7 @@ ExecStart=/usr/local/bin/mt7902-init.sh
 [Install]
 WantedBy=multi-user.target
 EOF
-sudo systemctl enable mt7902-fix.service
+sudo systemctl enable --now mt7902-fix.service
 
 echo -e "blacklist mt7921_common\nblacklist mt7921_lib" | sudo tee /etc/modprobe.d/mt7902-blacklist.conf > /dev/null
 
@@ -113,18 +99,6 @@ if [ -f /etc/bluetooth/main.conf ]; then
     sed -i 's/#AutoEnable=true/AutoEnable=true/' /etc/bluetooth/main.conf
 fi
 
-
-# --- 6. THE "HART" RESTART ---
-log "Reloading module stack..."
-systemctl stop bluetooth || true
-modprobe -r mt7921e btusb btmtk mt7921_common mt76_connac_lib mt76 2>/dev/null || true
-depmod -a "$KVER"
-modprobe mt76
-modprobe btmtk
-modprobe btusb
-modprobe mt7921e 2>/dev/null || true
-systemctl start bluetooth
-systemctl restart NetworkManager
-
+systemctl restart bluetooth
 rm -rf /tmp/mt7902_sync
-success "MT7902 Full Stack Installed! WiFi and Bluetooth are now automated and DKMS-managed."
+success "MT7902 Full Stack Installed and Power-Managed."
